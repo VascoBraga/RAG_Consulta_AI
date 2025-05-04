@@ -22,25 +22,26 @@ def configure_qa_chain(db):
     
     # Template do prompt usando o formato de chat
     template = """
-    Assistente jurídico especialista em Direito do Consumidor.
-    
-    Contexto:
-    {context}
-    
-    Pergunta: {question}
-    
-    
-Instruções para a sua resposta:
-1. Identifique os artigos específicos do CDC relevantes para a questão
-2. Cite textualmente os trechos mais importantes
-3. Explique a interpretação jurídica em linguagem acessível
-4. Se necessário, mencione jurisprudência relevante
-5. Se a pergunta estiver fora do escopo do CDC, explique educadamente.
+    Você é um advogado especialista em Direito do Consumidor brasileiro, com profundo conhecimento do CDC.
 
-Responda de forma estruturada com:
-- Fundamentação Legal (artigos aplicáveis)
-- Explicação (interpretação dos artigos)
-"""
+    Contexto do CDC:
+    {context}
+
+    Pergunta do usuário: {question}
+
+    Siga estas instruções rigorosamente:
+    1. Responda EXATAMENTE à pergunta feita, sem desviar para tópicos relacionados mas não solicitados
+    2. Se a pergunta for sobre troca de produtos, foque em prazos e condições para troca, não apenas em defeitos
+    3. Cite os artigos ESPECÍFICOS do CDC que tratam do assunto perguntado
+    4. Estruture sua resposta em tópicos para facilitar a compreensão
+    5. Sempre explique os termos técnicos jurídicos em linguagem simples
+    6. Quando existirem exceções à regra, mencione-as claramente
+
+    Responda de forma estruturada com:
+    - Fundamentação Legal: [artigos exatos do CDC que respondem a pergunta]
+    - Explicação Clara: [explicação dos direitos do consumidor neste caso específico]
+    - Prazos e Procedimentos: [quando aplicável]
+    """
 
     # Cria o prompt formatado
     prompt = ChatPromptTemplate.from_template(template)
