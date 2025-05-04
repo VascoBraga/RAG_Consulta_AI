@@ -13,20 +13,35 @@ def configure_qa_chain(db):
     
     # Configura o retriever
     retriever = db.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": 4}  # Recupera os 4 chunks mais relevantes
+        search_type="mmr",
+        # Recupera os 6 chunks mais relevantes para depois filtrar
+        # Recupera 10 documento
+        # Faz um balanceamento entre relevância e diversidade
+        search_kwargs={"k": 6, "fetch_k": 10, "lambda_mult": 0.7}
     )
     
     # Template do prompt usando o formato de chat
     template = """
-    Assistente especialista em Direito do Consumidor.
+    Assistente jurídico especialista em Direito do Consumidor.
     
     Contexto:
     {context}
     
     Pergunta: {question}
-    """
     
+    
+Instruções para a sua resposta:
+1. Identifique os artigos específicos do CDC relevantes para a questão
+2. Cite textualmente os trechos mais importantes
+3. Explique a interpretação jurídica em linguagem acessível
+4. Se necessário, mencione jurisprudência relevante
+5. Se a pergunta estiver fora do escopo do CDC, explique educadamente.
+
+Responda de forma estruturada com:
+- Fundamentação Legal (artigos aplicáveis)
+- Explicação (interpretação dos artigos)
+"""
+
     # Cria o prompt formatado
     prompt = ChatPromptTemplate.from_template(template)
     
@@ -51,7 +66,7 @@ def query_rag(qa_chain, user_question):
         return {"result": f"Erro ao processar a pergunta: {str(e)}"}
 
 def run_bot():
-    """Executa o bot interativo para responder perguntas sobre Direito do Consumidor."""
+    """Executa o bot interativo para responder perguntas sobre fluxo de caixa."""
     # Carrega o ambiente
     load_environment()
     
@@ -61,12 +76,12 @@ def run_bot():
     # Configura a cadeia QA
     qa_chain = configure_qa_chain(db)
     
-    print("\n=== Assistente de Código do Consumidor ===")
-    print("Digite suas perguntas sobre Código do Consumidor ou 'sair' para encerrar.\n")
+    print("\n=== Assistente Virtual sobre Direito do Consumidor ===")
+    print("Digite suas perguntas sobre Direito do Consumidor ou 'finalizar' para encerrar.\n")
     
     while True:
         question = input("Pergunta: ")
-        if question.lower() in ["sair", "exit", "quit"]:
+        if question.lower() in ["sair", "exit", "quit", "finalizar"]:
             break
         
         print("\nProcessando pergunta, por favor aguarde...")
