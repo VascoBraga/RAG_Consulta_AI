@@ -138,7 +138,7 @@ def extract_article_metadata(text):
 
     #Padrões para identificar elementos estruturais
     article_match = re.search(r'Art\.\s*(d+)', text)
-    chapter_match = re.seacrh(r'CAPÍTULO\s+([IVX]+[0-9]+)', text, re.IGNORECASE)
+    chapter_match = re.search(r'CAPÍTULO\s+([IVX]+[0-9]+)', text, re.IGNORECASE)
     title_match   = re.search(r'TÍTULO\s+(IVX]+|[0-9]+)', text, re.IGNORECASE)
 
     if article_match:
@@ -311,6 +311,17 @@ def update_vector_db(document_paths, vector_db=None, document_metadata=None):
     return vector_db
 
 
+def month_to_number(month_name):
+    """Converte nome do mês para número."""
+    months = {
+        'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04',
+        'maio': '05', 'junho': '06', 'julho': '07', 'agosto': '08',
+        'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12'
+    }
+    return months.get(month_name.lower(), '00')
+
+
+
 def extract_document_info(doc_name, text):
     """
     Extrai informações estruturais do documento como tipo, número e data.
@@ -350,16 +361,6 @@ def extract_document_info(doc_name, text):
         info["publication_date"] = f"{date_match.group(1)}/{month_to_number(date_match.group(2))}/{date_match.group(3)}"
     
     return info
-
-
-def month_to_number(month_name):
-    """Converte nome do mês para número."""
-    months = {
-        'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04',
-        'maio': '05', 'junho': '06', 'julho': '07', 'agosto': '08',
-        'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12'
-    }
-    return months.get(month_name.lower(), '00')
 
 
 def split_legal_text(text, doc_info):
@@ -451,124 +452,6 @@ def split_legal_text(text, doc_info):
     
     return validated_chunks
 
-
-def extract_document_info(doc_name, text):
-    """
-    Extrai informações estruturais do documento como tipo, número e data.
-    
-    Args:
-        doc_name (str): Nome do documento
-        text (str): Texto do documento
-    
-    Returns:
-        dict: Metadados extraídos
-    """
-    info = {
-        "source": doc_name,
-        "doc_type": "unknown"
-    }
-    
-    # Identifica o tipo de documento
-    if "lei" in doc_name.lower():
-        info["doc_type"] = "lei"
-    elif "decreto" in doc_name.lower():
-        info["doc_type"] = "decreto"
-    elif "resolução" in doc_name.lower() or "resolucao" in doc_name.lower():
-        info["doc_type"] = "resolucao"
-    elif "código" in doc_name.lower() or "codigo" in doc_name.lower():
-        info["doc_type"] = "codigo"
-    
-    # Extrai número do documento
-    number_match = re.search(r'(?:n[º°.]?\s*)([\d\.]+)(?:/(\d{4}))?', doc_name)
-    if number_match:
-        info["doc_number"] = number_match.group(1)
-        if number_match.group(2):  # Ano
-            info["doc_year"] = number_match.group(2)
-    
-    return info
-
-
-
-def split_legal_text(text, doc_info):
-    """
-    Divide o texto legal em chunks baseados na estrutura de artigos/seções.
-    
-    Args:
-        text (str): Texto limpo do documento
-        doc_info (dict): Informações estruturais do documento
-    
-    Returns:
-        list: Lista de chunks com metadados
-    """
-    # Verifica se doc_info é um dicionário
-    if not isinstance(doc_info, dict):
-        doc_info = {"source": "unknown"}
-    
-    chunks = []
-    
-    # Padrões para documentos jurídicos brasileiros
-    article_pattern = r'Art\.?\s*(\d+[º°]?[A-Z]?)[.\s-]+(.*?)(?=Art\.?\s*\d+[º°]?[A-Z]?|$)'
-    
-    # Tenta dividir por artigos
-    articles = re.findall(article_pattern, text, re.DOTALL)
-    
-    if articles:
-        for number, content in articles:
-            # Limpa o conteúdo
-            clean_content = clean_text(content)
-            
-            # Cria metadados específicos para este chunk
-            metadata = doc_info.copy()
-            metadata["article_number"] = number.strip()
-            metadata["content_type"] = "article"
-            
-            # Cria o chunk com referência explícita ao artigo
-            chunk_text = f"Artigo {number.strip()}: {clean_content}"
-            
-            # Se o artigo for muito grande, subdivide
-            if len(chunk_text) > CHUNK_SIZE:
-                text_splitter = RecursiveCharacterTextSplitter(
-                    chunk_size=CHUNK_SIZE,
-                    chunk_overlap=CHUNK_OVERLAP
-                )
-                sub_chunks = text_splitter.split_text(chunk_text)
-                
-                for i, sub_chunk in enumerate(sub_chunks):
-                    sub_metadata = metadata.copy()
-                    sub_metadata["part"] = i + 1
-                    sub_metadata["total_parts"] = len(sub_chunks)
-                    
-                    # Adiciona como dicionário com text e metadata
-                    chunks.append({
-                        "text": sub_chunk,
-                        "metadata": sub_metadata
-                    })
-            else:
-                # Artigo não é grande, manter como um único chunk
-                chunks.append({
-                    "text": chunk_text,
-                    "metadata": metadata
-                })
-    else:
-        # Se não encontrou estrutura de artigos, usa chunking padrão
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=CHUNK_SIZE,
-            chunk_overlap=CHUNK_OVERLAP
-        )
-        simple_chunks = text_splitter.split_text(text)
-        
-        for i, chunk in enumerate(simple_chunks):
-            metadata = doc_info.copy()
-            metadata["chunk_index"] = i
-            metadata["total_chunks"] = len(simple_chunks)
-            
-            # Adiciona como dicionário com text e metadata
-            chunks.append({
-                "text": chunk,
-                "metadata": metadata
-            })
-    
-    return chunks
 
 def integrate_consumer_law_documents():
     """Integra múltiplos documentos de legislação do consumidor na base de conhecimento."""
@@ -823,18 +706,23 @@ def process_all_documents():
                 # Extrai e processa o texto
                 raw_text = extract_text_from_pdf(doc_path)
                 cleaned_text = clean_text(raw_text)
-                chunks = split_text(cleaned_text)
+                
+                # Cria informações sobre o documento
+                doc_info = extract_document_info(doc_name, cleaned_text)
+                
+                # Divide o texto em chunks
+                chunks = split_legal_text(cleaned_text, doc_info)
                 print(f"Documento dividido em {len(chunks)} chunks.")
                 
-                # Adiciona metadados aos chunks
-                for i, chunk in enumerate(chunks):
-                    all_texts.append(chunk)
-                    all_metadatas.append({
-                        "source": doc_name,
-                        "chunk_index": i,
-                        "total_chunks": len(chunks),
-                        "document_path": doc_path
-                    })
+                # Adiciona os chunks ao banco
+                for chunk in chunks:
+                    if isinstance(chunk, dict) and "text" in chunk and "metadata" in chunk:
+                        all_texts.append(chunk["text"])
+                        all_metadatas.append(filter_complex_metadata(chunk["metadata"]))
+                    elif isinstance(chunk, str):
+                        all_texts.append(chunk)
+                        metadata = {"source": doc_name}
+                        all_metadatas.append(metadata)
             else:
                 print(f"AVISO: Arquivo não encontrado: {doc_path}")
         except Exception as e:
@@ -851,8 +739,6 @@ def process_all_documents():
         persist_directory=DB_PATH
     )
     
-    # Persiste as mudanças no banco de dados
-    #db.persist()
     print(f"Banco de dados vetorial criado com sucesso em '{DB_PATH}'.")
     
     return db
