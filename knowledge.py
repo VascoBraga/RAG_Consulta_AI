@@ -91,3 +91,121 @@ def get_or_create_db():
     else:
         print("Banco de dados vetorial não encontrado. Criando um novo...")
         return process_pdf_and_create_db()
+
+
+def extract_document_info(doc_name, text):
+    """
+    Extrai informações estruturais do documento como tipo, número e data.
+    
+    Args:
+        doc_name (str): Nome do documento
+        text (str): Texto do documento
+    
+    Returns:
+        dict: Metadados extraídos
+    """
+    info = {
+        "source": doc_name,
+        "doc_type": "unknown"
+    }
+    
+    # Identifica o tipo de documento
+    if "lei" in doc_name.lower():
+        info["doc_type"] = "lei"
+    elif "decreto" in doc_name.lower():
+        info["doc_type"] = "decreto"
+    elif "resolução" in doc_name.lower() or "resolucao" in doc_name.lower():
+        info["doc_type"] = "resolucao"
+    elif "código" in doc_name.lower() or "codigo" in doc_name.lower():
+        info["doc_type"] = "codigo"
+    
+    # Extrai número do documento
+    number_match = re.search(r'(?:n[º°.]?\s*)([\d\.]+)(?:/(\d{4}))?', doc_name)
+    if number_match:
+        info["doc_number"] = number_match.group(1)
+        if number_match.group(2):  # Ano
+            info["doc_year"] = number_match.group(2)
+    
+    return info
+
+
+def split_legal_text(text, doc_info):
+    """
+    Divide o texto legal em chunks baseados na estrutura de artigos/seções.
+    
+    Args:
+        text (str): Texto limpo do documento
+        doc_info (dict): Informações estruturais do documento
+    
+    Returns:
+        list: Lista de chunks com metadados
+    """
+    # Verifica se doc_info é um dicionário
+    if not isinstance(doc_info, dict):
+        doc_info = {"source": "unknown"}
+    
+    chunks = []
+    
+    # Padrões para documentos jurídicos brasileiros
+    article_pattern = r'Art\.?\s*(\d+[º°]?[A-Z]?)[.\s-]+(.*?)(?=Art\.?\s*\d+[º°]?[A-Z]?|$)'
+    
+    # Tenta dividir por artigos
+    articles = re.findall(article_pattern, text, re.DOTALL)
+    
+    if articles:
+        for number, content in articles:
+            # Limpa o conteúdo
+            clean_content = clean_text(content)
+            
+            # Cria metadados específicos para este chunk
+            metadata = doc_info.copy()
+            metadata["article_number"] = number.strip()
+            metadata["content_type"] = "article"
+            
+            # Cria o chunk com referência explícita ao artigo
+            chunk_text = f"Artigo {number.strip()}: {clean_content}"
+            
+            # Se o artigo for muito grande, subdivide
+            if len(chunk_text) > CHUNK_SIZE:
+                text_splitter = RecursiveCharacterTextSplitter(
+                    chunk_size=CHUNK_SIZE,
+                    chunk_overlap=CHUNK_OVERLAP
+                )
+                sub_chunks = text_splitter.split_text(chunk_text)
+                
+                for i, sub_chunk in enumerate(sub_chunks):
+                    sub_metadata = metadata.copy()
+                    sub_metadata["part"] = i + 1
+                    sub_metadata["total_parts"] = len(sub_chunks)
+                    
+                    # Adiciona como dicionário com text e metadata
+                    chunks.append({
+                        "text": sub_chunk,
+                        "metadata": sub_metadata
+                    })
+            else:
+                # Artigo não é grande, manter como um único chunk
+                chunks.append({
+                    "text": chunk_text,
+                    "metadata": metadata
+                })
+    else:
+        # Se não encontrou estrutura de artigos, usa chunking padrão
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=CHUNK_SIZE,
+            chunk_overlap=CHUNK_OVERLAP
+        )
+        simple_chunks = text_splitter.split_text(text)
+        
+        for i, chunk in enumerate(simple_chunks):
+            metadata = doc_info.copy()
+            metadata["chunk_index"] = i
+            metadata["total_chunks"] = len(simple_chunks)
+            
+            # Adiciona como dicionário com text e metadata
+            chunks.append({
+                "text": chunk,
+                "metadata": metadata
+            })
+    
+    return chunks
