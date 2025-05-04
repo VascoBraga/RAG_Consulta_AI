@@ -52,6 +52,7 @@ def clean_text(text):
     text = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', text)
     return text.strip()
 
+
 def split_text(text, doc_info=None):
     """Divide o texto em chunks para processamento."""
     text_splitter = RecursiveCharacterTextSplitter(
@@ -60,12 +61,19 @@ def split_text(text, doc_info=None):
         length_function=len,
         separators=["\n\n", "\n", ". ", " ", ""]
     )
+    
     # Isso retorna uma lista de strings
     raw_chunks = text_splitter.split_text(text)
+    print(f"Texto dividido em {len(raw_chunks)} raw_chunks (strings)")
     
     # Convertemos para o formato esperado com metadados
     chunks = []
     for i, chunk_text in enumerate(raw_chunks):
+        # Verificação de segurança - garantir que o texto é uma string
+        if not isinstance(chunk_text, str):
+            print(f"AVISO: chunk_text não é uma string, é {type(chunk_text)}")
+            chunk_text = str(chunk_text)
+        
         # Criamos um dicionário para cada chunk
         chunk = {
             "text": chunk_text,
@@ -76,39 +84,51 @@ def split_text(text, doc_info=None):
         }
         
         # Adicionamos metadados do documento, se fornecidos
-        if doc_info:
+        if doc_info and isinstance(doc_info, dict):
             chunk["metadata"].update(doc_info)
-            
+        
         chunks.append(chunk)
     
+    # Verificação final
+    print(f"Convertido para {len(chunks)} chunks (dicionários)")
+    
+
+    print(f"DEBUGGING split_text: Retornando {len(chunks)} chunks")
+    for i in range(min(3, len(chunks))):
+        print(f"DEBUGGING split_text: Chunk {i} é do tipo {type(chunks[i])}")
+
     return chunks
+
 
 def create_vector_db(chunks):
     """Gera embeddings e armazena no Chroma DB."""
     # Inicializa o modelo de embeddings
-    embeddings = OpenAIEmbeddings(
-        model=EMBED_MODEL
-        # Removido o parâmetro dimensions que não é mais suportado
-    )
-   
+    embeddings = OpenAIEmbeddings(model=EMBED_MODEL)
+    
+    # Processa chunks para extrair textos e metadados de forma segura
+    texts = []
+    metadatas = []
+    
+    for chunk in chunks:
+        if isinstance(chunk, dict) and "text" in chunk and "metadata" in chunk:
+            texts.append(chunk["text"])
+            metadatas.append(filter_complex_metadata(chunk["metadata"]))
+        elif isinstance(chunk, str):
+            texts.append(chunk)
+            metadatas.append({})
+        else:
+            print(f"AVISO: Tipo de chunk inesperado: {type(chunk)}")
+            continue
+    
     # Cria o banco de dados Chroma
     db = Chroma.from_texts(
-        texts=chunks,
+        texts=texts,
         embedding=embeddings,
+        metadatas=metadatas,
         persist_directory=DB_PATH
     )
     
-    # Persiste o banco de dados
-    #db.persist()
     return db
-
-    db = Chroma.from_documents(
-    documents=docs,
-    embedding=embedding,
-    persist_directory="./chroma_db"
-)
-
-    #db.persist()
 
 
 def load_vector_db():
@@ -197,25 +217,15 @@ def split_text_by_articles(text):
     
     return chunks
 
+
 def update_vector_db(document_paths, vector_db=None, document_metadata=None):
     """
     Atualiza o banco de dados existente com novos documentos.
-    
-    Args:
-        document_paths (dict): Dicionário com o formato {nome_documento: caminho_arquivo}
-        vector_db (Chroma, optional): Instância do banco de dados. Se None, será carregado.
-        document_metadata (dict, optional): Metadados adicionais para cada documento.
-    
-    Returns:
-        Chroma: Instância do banco de dados atualizado.
     """
-    # Renomeei 'db' para 'vector_db' para evitar colisões de nome
     if vector_db is None:
         vector_db = get_or_create_db()
     
-    # Verificação de tipo para garantir que vector_db é um objeto com o método add_texts
     if not hasattr(vector_db, 'add_texts'):
-        print(f"AVISO: O objeto vector_db não tem o método 'add_texts'. Tipo: {type(vector_db)}")
         print("Criando um novo banco de dados vetorial...")
         embeddings = OpenAIEmbeddings(model=EMBED_MODEL)
         vector_db = Chroma(
@@ -225,8 +235,6 @@ def update_vector_db(document_paths, vector_db=None, document_metadata=None):
     
     if document_metadata is None:
         document_metadata = {}
-    
-    embeddings = OpenAIEmbeddings(model=EMBED_MODEL)
     
     total_chunks = 0
     
@@ -238,7 +246,7 @@ def update_vector_db(document_paths, vector_db=None, document_metadata=None):
         print(f"Processando documento: {doc_name} ({doc_path})")
         
         try:
-            # Detecta o tipo de arquivo
+            # Extrai e processa o texto
             if doc_path.lower().endswith('.pdf'):
                 raw_text = extract_text_from_pdf(doc_path)
             elif doc_path.lower().endswith(('.txt', '.md')):
@@ -251,63 +259,48 @@ def update_vector_db(document_paths, vector_db=None, document_metadata=None):
             # Limpa e processa o texto
             cleaned_text = clean_text(raw_text)
             
-            # Extrai informação estrutural (número da lei, tipo de documento, etc.)
+            # Extrai informação estrutural do documento
             doc_info = extract_document_info(doc_name, cleaned_text)
             
             # Adiciona metadados personalizados, se disponíveis
             if doc_name in document_metadata:
                 doc_info.update(document_metadata[doc_name])
             
-            # Divide o texto considerando a estrutura de documentos jurídicos
+            # Divide o texto em chunks
             chunks = split_legal_text(cleaned_text, doc_info)
             
             print(f"  -> Documento dividido em {len(chunks)} chunks.")
             total_chunks += len(chunks)
             
-            # Adiciona os novos chunks ao banco de dados
+            # ABORDAGEM SIMPLIFICADA: Processa chunks diretamente
             texts = []
             metadatas = []
             
+            # Coleta todos os textos e metadados primeiro
             for chunk in chunks:
+                # Usamos apenas os chunks que são dicionários com formato correto
                 if isinstance(chunk, dict) and "text" in chunk and "metadata" in chunk:
-					# Formato correto
-                    texts.append(chunk["text"])
-					# Filtra metadados complexos
-                    metadatas.append(chunk["metadata"])
-                elif isinstance(chunk, str):
-					# Se for uma string, criar metadados básicos
-                    texts.append(chunk)
-                    metadata = {"source": doc_name, "chunk_index": len(texts) - 1}
-					# Adiciona metadados do documento se disponíveis
-                    if doc_name in document_metadata:
-                        metadata.update(document_metadata[doc_name])
-                    metadatas.append(metadata)
-
-			# Agora filtra os metadados após garantir que todos estão no formato correto
-            filtered_metadatas = [filter_complex_metadata(m) for m in metadatas]
-						
-            try:
-                vector_db.add_texts(texts=texts, metadatas=filtered_metadatas)
-                print(f"  -> Chunks adicionados ao banco de dados com sucesso.")
-            except TypeError as e:
-                if "unexpected keyword argument 'embeddings'" in str(e):
-                    # Algumas versões do Chroma não aceitam o parâmetro embeddings diretamente
-                    vector_db.add_texts(texts=texts, metadatas=filtered_metadatas)
-                    print(f"  -> Chunks adicionados ao banco de dados com sucesso (sem embeddings explícitos).")
-                else:
-                    raise
+                    text = chunk["text"]
+                    metadata = chunk["metadata"]
                     
+                    # Verifica se metadata é um dicionário
+                    if isinstance(metadata, dict):
+                        texts.append(text)
+                        metadatas.append(filter_complex_metadata(metadata))
+            
+            # Verifica se temos dados para adicionar
+            if texts and metadatas:
+                # Adiciona todos de uma vez
+                vector_db.add_texts(texts=texts, metadatas=metadatas)
+                print(f"  -> {len(texts)} chunks adicionados ao banco de dados com sucesso.")
+            else:
+                print("  -> Nenhum chunk válido para adicionar ao banco de dados.")
+                
         except Exception as e:
             print(f"Erro ao processar documento {doc_name}: {str(e)}")
             print(f"Continuando com os próximos documentos...")
     
-    # Persiste as mudanças
-    try:
-        #vector_db.persist()
-        print(f"Banco de dados atualizado com sucesso. Total de {total_chunks} novos chunks adicionados.")
-    except Exception as e:
-        print(f"AVISO: Não foi possível persistir o banco de dados: {str(e)}")
-    
+    print(f"Banco de dados atualizado com sucesso. Total de {total_chunks} novos chunks adicionados.")
     return vector_db
 
 
@@ -450,191 +443,44 @@ def split_legal_text(text, doc_info):
                 "metadata": {"source": "document"}
             })
     
+    print(f"DEBUGGING split_legal_text: Retornando {len(chunks)} chunks")
+    for i in range(min(3, len(chunks))):
+        print(f"DEBUGGING split_legal_text: Chunk {i} é do tipo {type(chunks[i])}")
+
     return validated_chunks
 
 
 def integrate_consumer_law_documents():
-    """Integra múltiplos documentos de legislação do consumidor na base de conhecimento."""
-    # Dicionário de documentos a serem processados
-    documents = {
-        "Código do Consumidor (Lei 8.078/90)": "CDC_2024.pdf",
-        "Decreto 11.034/2022": "decreto_11034_2022.pdf",
-        "Lei 14.034/2020": "lei_14034_2020.pdf",
-        "Lei Complementar 166/2019": "lc_166_2019.pdf",
-        "Lei 13.828/2019": "lei_13828_2019.pdf",
-        "Lei 10.962/2004": "lei_10962_2004.pdf",
-        "Decreto 5.903/2006": "decreto_5903_2006.pdf",
-        "Lei 12.741/2012": "lei_12741_2012.pdf",
-        "Lei 12.291/2010": "lei_12291_2010.pdf",
-        "Decreto 7.962/2013": "decreto_7962_2013.pdf",
-        "Decreto 6.523/2008": "decreto_6523_2008.pdf",
-        "Decreto 2.181/1997": "decreto_2181_1997.pdf",
-        "Resolução CNSP 107/2004": "resolucao_cnsp_107_2004.pdf",
-        "Resolução CNSP 296": "resolucao_cnsp_296.pdf"
+    """Integra documentos de legislação do consumidor - implementação direta."""
+    # Carrega o banco de dados existente ou cria um novo
+    vector_db = None
+    if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
+        print(f"Carregando banco de dados vetorial existente de '{DB_PATH}'...")
+        vector_db = load_vector_db()
+    
+    # Metadados para o CDC
+    cdc_metadata = {
+        "description": "Lei principal que estabelece normas de proteção e defesa do consumidor",
+        "importance": "alta",
+        "category": "direitos_basicos",
+        "publication_date": "11/09/1990",
+        "scope": "geral",
+        "hierarchy": "lei_principal"
     }
     
-    # Metadados adicionais para cada documento
-    metadata = {
-        "Código do Consumidor (Lei 8.078/90)": {
-            "description": "Código de Defesa do Consumidor - Lei principal que estabelece normas de proteção e defesa do consumidor",
-            "importance": "alta",
-            "category": "direitos_basicos"
-        },
-        "Decreto 11.034/2022": {
-            "description": "Regulamenta o atendimento via SAC",
-            "importance": "média", 
-            "category": "atendimento"
-        },
-        # Adicionar metadados para os outros documentos...
+    # Processa o documento do CDC
+    cdc_path = DOCUMENTO_PATHS["Código do Consumidor (Lei nº 8.078/90)"]
+    vector_db = process_and_add_document(
+        "Código do Consumidor (Lei nº 8.078/90)",
+        cdc_path,
+        vector_db=vector_db, 
+        custom_metadata=cdc_metadata
+    )
     
-        "Código do Consumidor (Lei nº 8.078/90)": {
-            "description": "Lei principal que estabelece normas de proteção e defesa do consumidor nas relações de consumo",
-            "importance": "alta",
-            "category": "direitos_basicos",
-            "publication_date": "11/09/1990",
-            "keywords": ["defesa do consumidor", "direitos básicos", "práticas abusivas", "produtos e serviços", "responsabilidade civil"],
-            "summary": "Estabelece direitos básicos dos consumidores, regras de qualidade de produtos e serviços, práticas comerciais, proteção contratual e sanções administrativas",
-            "scope": "geral",
-            "hierarchy": "lei_principal"
-        },
-        
-        "Lei Complementar n.166/2019": {
-            "description": "Dispõe sobre cadastros positivos de crédito e regula a anotação de informações de adimplemento",
-            "importance": "média",
-            "category": "credito_financeiro",
-            "publication_date": "08/04/2019",
-            "keywords": ["cadastro positivo", "proteção de dados", "score de crédito", "bancos de dados"],
-            "summary": "Regulamenta o cadastro positivo de crédito, permitindo o compartilhamento de informações sobre adimplemento entre gestores de bancos de dados",
-            "scope": "especifico",
-            "hierarchy": "lei_complementar"
-        },
-        
-        "Lei n.13.828/2019": {
-            "description": "Altera a Lei nº 8.078/90 (CDC) para autorizar a autoridade administrativa a requisitar auxílio de força policial",
-            "importance": "média",
-            "category": "fiscalizacao",
-            "publication_date": "13/05/2019",
-            "keywords": ["fiscalização", "força policial", "autoridade administrativa", "poder de polícia"],
-            "summary": "Permite que autoridades administrativas de defesa do consumidor requisitem auxílio de força policial para cumprimento de suas determinações",
-            "scope": "especifico",
-            "hierarchy": "lei_ordinaria",
-            "modifies": "Lei nº 8.078/90"
-        },
-        
-        "Lei n. 10.962/2004": {
-            "description": "Dispõe sobre a oferta e as formas de afixação de preços de produtos e serviços para o consumidor",
-            "importance": "média",
-            "category": "informacao_preco",
-            "publication_date": "11/10/2004",
-            "keywords": ["afixação de preços", "informação", "etiquetas", "código de barras"],
-            "summary": "Regula a oferta e as formas de afixação de preços em vitrines e a marcação em produtos expostos a venda ao consumidor",
-            "scope": "especifico",
-            "hierarchy": "lei_ordinaria"
-        },
-        
-        "Decreto n. 5.903/2006": {
-            "description": "Regulamenta a Lei n. 10.962/2004 e dispõe sobre as práticas infracionais na oferta de produtos e serviços",
-            "importance": "média",
-            "category": "informacao_preco",
-            "publication_date": "20/09/2006",
-            "keywords": ["afixação de preços", "código de barras", "precificação", "infrações"],
-            "summary": "Detalha as regras para afixação de preços, uso de código de barras e estabelece as práticas consideradas infracionais",
-            "scope": "especifico",
-            "hierarchy": "decreto_regulamentador",
-            "regulates": "Lei n. 10.962/2004"
-        },
-        
-        "Lei n. 12.741/2012": {
-            "description": "Dispõe sobre medidas de clareza na informação sobre tributos incidentes sobre mercadorias e serviços",
-            "importance": "média",
-            "category": "informacao_tributaria",
-            "publication_date": "08/12/2012",
-            "keywords": ["tributos", "carga tributária", "nota fiscal", "informação ao consumidor"],
-            "summary": "Obriga a informação do valor aproximado dos tributos incidentes sobre mercadorias e serviços nos documentos fiscais",
-            "scope": "especifico",
-            "hierarchy": "lei_ordinaria"
-        },
-        
-        "Lei n. 12.291/2010": {
-            "description": "Torna obrigatória a manutenção de exemplar do Código de Defesa do Consumidor nos estabelecimentos comerciais",
-            "importance": "baixa",
-            "category": "informacao_consumidor",
-            "publication_date": "20/07/2010",
-            "keywords": ["disponibilização do CDC", "estabelecimentos comerciais", "informação"],
-            "summary": "Obriga estabelecimentos comerciais a manterem exemplar do CDC disponível para consulta do público em local visível",
-            "scope": "especifico",
-            "hierarchy": "lei_ordinaria"
-        },
-        
-        "Decreto n. 7.962/2013": {
-            "description": "Regulamenta o CDC para dispor sobre a contratação no comércio eletrônico",
-            "importance": "alta",
-            "category": "comercio_eletronico",
-            "publication_date": "15/03/2013",
-            "keywords": ["comércio eletrônico", "e-commerce", "contratação à distância", "internet"],
-            "summary": "Estabelece regras para compras online, incluindo identificação do fornecedor, apresentação de informações e direito de arrependimento",
-            "scope": "especifico",
-            "hierarchy": "decreto_regulamentador",
-            "regulates": "Lei nº 8.078/90"
-        },
-        
-        "Decreto n. 6.523/2008": {
-            "description": "Regulamenta o CDC para fixar normas sobre o Serviço de Atendimento ao Consumidor (SAC)",
-            "importance": "alta",
-            "category": "atendimento",
-            "publication_date": "31/07/2008",
-            "keywords": ["SAC", "call center", "atendimento telefônico", "reclamações"],
-            "summary": "Estabelece regras para o funcionamento dos SACs telefônicos, incluindo tempo de espera, opções de atendimento e resolução de demandas",
-            "scope": "especifico",
-            "hierarchy": "decreto_regulamentador",
-            "regulates": "Lei nº 8.078/90"
-        },
-        
-        "Decreto n. 2.181/1997": {
-            "description": "Dispõe sobre a organização do Sistema Nacional de Defesa do Consumidor (SNDC) e estabelece normas gerais sobre sanções administrativas",
-            "importance": "alta",
-            "category": "fiscalizacao_sancoes",
-            "publication_date": "20/03/1997",
-            "keywords": ["SNDC", "fiscalização", "sanções administrativas", "processo administrativo"],
-            "summary": "Organiza o SNDC e estabelece os procedimentos administrativos para aplicação de sanções por violação ao CDC",
-            "scope": "geral",
-            "hierarchy": "decreto_regulamentador",
-            "regulates": "Lei nº 8.078/90"
-        },
-        
-        "Resolução CNSP n. 107/2004": {
-            "description": "Estabelece regras e critérios para os planos de seguro sob a forma de bilhete",
-            "importance": "baixa",
-            "category": "seguros",
-            "publication_date": "16/01/2004",
-            "keywords": ["seguro", "bilhete de seguro", "direitos do segurado", "contratos de adesão"],
-            "summary": "Regula os planos de seguro sob a forma de bilhete, com transparência e proteção ao consumidor",
-            "scope": "especifico",
-            "hierarchy": "resolucao_normativa",
-            "regulatory_agency": "CNSP"
-        },
-        
-        "Resolução CNSP n. 296": {
-            "description": "Institui regras e procedimentos para intermediação de seguros e resseguros",
-            "importance": "baixa",
-            "category": "seguros",
-            "publication_date": "25/10/2013",
-            "keywords": ["seguro", "intermediação", "corretor", "transparência"],
-            "summary": "Estabelece regras de conduta, transparência e proteção ao consumidor na intermediação de contratos de seguro",
-            "scope": "especifico",
-            "hierarchy": "resolucao_normativa",
-            "regulatory_agency": "CNSP"
-        }
-    }
-
-    
-    # Carrega o banco de dados existente
-    vector_db = get_or_create_db()
-    
-    # Atualiza o banco com os novos documentos
-    vector_db = update_vector_db(DOCUMENTO_PATHS, vector_db, metadata)
+    # Adicione outros documentos conforme necessário
     
     return vector_db
+
 
 def configure_advanced_retriever(db):
     """Configura um retriever avançado que aproveita os metadados dos documentos."""
@@ -643,9 +489,9 @@ def configure_advanced_retriever(db):
     base_retriever = db.as_retriever(
         search_type="mmr",
         search_kwargs={
-            "k": 6,
-            "fetch_k": 10,
-            "lambda_mult": 0.7
+            "k": 8,
+            "fetch_k": 15,
+            "lambda_mult": 0.5
         }
     )
     
@@ -687,6 +533,73 @@ def configure_advanced_retriever(db):
     
     return advanced_retriever
 
+
+def process_and_add_document(doc_name, doc_path, vector_db=None, custom_metadata=None):
+    """
+    Processa um único documento e o adiciona ao banco de dados - abordagem simples e direta.
+    """
+    print(f"Processando documento: {doc_name} ({doc_path})")
+    
+    # Obtém ou cria o banco de dados
+    if vector_db is None:
+        vector_db = load_vector_db() if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0 else None
+    
+    if vector_db is None or not hasattr(vector_db, 'add_texts'):
+        embeddings = OpenAIEmbeddings(model=EMBED_MODEL)
+        vector_db = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
+    
+    # Extrai e limpa o texto
+    raw_text = extract_text_from_pdf(doc_path)
+    cleaned_text = clean_text(raw_text)
+    
+    # Divide o texto em partes menores
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=CHUNK_SIZE,
+        chunk_overlap=CHUNK_OVERLAP,
+        separators=["\n\n", "\n", ". ", " ", ""]
+    )
+    chunks = text_splitter.split_text(cleaned_text)
+    print(f"Documento dividido em {len(chunks)} chunks")
+    
+    # Prepara metadados base
+    base_metadata = {
+        "source": doc_name,
+        "document_path": doc_path
+    }
+    
+    # Adiciona metadados personalizados se fornecidos
+    if custom_metadata and isinstance(custom_metadata, dict):
+        base_metadata.update(custom_metadata)
+    
+    # Filtra metadados complexos usando nossa função personalizada
+    base_metadata = filter_metadata_dict(base_metadata)
+    
+    # Prepara listas de textos e metadados
+    texts = []
+    metadatas = []
+    
+    for i, chunk in enumerate(chunks):
+        # Garantindo que chunk é uma string
+        if not isinstance(chunk, str):
+            chunk = str(chunk)
+        
+        # Cria metadados para este chunk
+        metadata = base_metadata.copy()
+        metadata["chunk_index"] = i
+        metadata["total_chunks"] = len(chunks)
+        
+        # Adiciona às listas
+        texts.append(chunk)
+        metadatas.append(metadata)
+    
+    # Adiciona ao banco de dados
+    if texts and metadatas:
+        vector_db.add_texts(texts=texts, metadatas=metadatas)
+        print(f"Adicionados {len(texts)} chunks ao banco de dados")
+    
+    return vector_db
+
+
 def process_all_documents():
     """Processa todos os documentos e os adiciona ao banco de dados."""
     print("Iniciando processamento de todos os documentos...")
@@ -707,26 +620,48 @@ def process_all_documents():
                 raw_text = extract_text_from_pdf(doc_path)
                 cleaned_text = clean_text(raw_text)
                 
+                # Informações de debug
+                print(f"Texto extraído do PDF: {len(raw_text)} caracteres")
+                print(f"Texto limpo: {len(cleaned_text)} caracteres")
+                
                 # Cria informações sobre o documento
                 doc_info = extract_document_info(doc_name, cleaned_text)
+                print(f"Metadados do documento: {doc_info}")
                 
-                # Divide o texto em chunks
-                chunks = split_legal_text(cleaned_text, doc_info)
+                # Divide o texto em chunks - AQUI ESTÁ O PROBLEMA POTENCIAL
+                # Pode estar retornando strings em vez de dicionários
+                chunks = split_text(cleaned_text, doc_info)
                 print(f"Documento dividido em {len(chunks)} chunks.")
                 
-                # Adiciona os chunks ao banco
+                # Verifica o tipo de cada chunk para debug
+                for i, chunk in enumerate(chunks[:2]):  # Mostra apenas os 2 primeiros para não sobrecarregar o log
+                    print(f"Chunk {i} tipo: {type(chunk)}")
+                    if isinstance(chunk, dict):
+                        print(f"Chunk {i} keys: {chunk.keys()}")
+                    else:
+                        print(f"Chunk {i} não é um dicionário, é {type(chunk)}")
+                
+                # Processa os chunks com segurança
                 for chunk in chunks:
                     if isinstance(chunk, dict) and "text" in chunk and "metadata" in chunk:
+                        # Se for um dicionário com a estrutura esperada
                         all_texts.append(chunk["text"])
                         all_metadatas.append(filter_complex_metadata(chunk["metadata"]))
                     elif isinstance(chunk, str):
+                        # Se for uma string
                         all_texts.append(chunk)
-                        metadata = {"source": doc_name}
-                        all_metadatas.append(metadata)
+                        all_metadatas.append({"source": doc_name})
+                    else:
+                        # Tipo inesperado, trata como uma string vazia
+                        print(f"AVISO: Chunk de tipo inesperado: {type(chunk)}")
+                        all_texts.append("")
+                        all_metadatas.append({"source": doc_name, "error": "tipo_inesperado"})
             else:
                 print(f"AVISO: Arquivo não encontrado: {doc_path}")
         except Exception as e:
             print(f"Erro ao processar {doc_name}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             print(f"Continuando com os próximos documentos...")
     
     # Cria o banco de dados com todos os textos coletados
@@ -742,3 +677,28 @@ def process_all_documents():
     print(f"Banco de dados vetorial criado com sucesso em '{DB_PATH}'.")
     
     return db
+
+def filter_metadata_dict(metadata_dict):
+    """
+    Filtra um dicionário de metadados, removendo valores complexos.
+    
+    Args:
+        metadata_dict (dict): Dicionário de metadados
+        
+    Returns:
+        dict: Dicionário filtrado apenas com tipos simples
+    """
+    filtered = {}
+    
+    for key, value in metadata_dict.items():
+        # Mantém apenas tipos simples: str, int, float, bool
+        if isinstance(value, (str, int, float, bool)):
+            filtered[key] = value
+        # Converte listas para strings separadas por vírgula
+        elif isinstance(value, list):
+            filtered[key] = ", ".join(str(item) for item in value)
+        # Ignora tipos complexos
+        else:
+            filtered[key] = str(value)
+    
+    return filtered
