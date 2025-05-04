@@ -1,10 +1,32 @@
-python-dotenv>=1.0.0
-PyMuPDF=1.22.3
-langchain>=0.0.267
-langchain-openai>=0.0.2
+# Dependências principais para o sistema RAG
+langchain>=0.1.0
+langchain-openai>=0.0.5
+langchain-core>=0.1.0
+langchain-community>=0.0.10
 langchain-chroma>=0.0.1
-chromadb>=0.4.13
+
+# OpenAI para embeddings e modelos de linguagem
 openai>=1.3.0
+
+# Banco de dados vetorial
+chromadb>=0.4.18
+
+# Processamento de PDF
+pymupdf>=1.23.7  # PyMuPDF para extração de texto de PDFs
+PyPDF2>=3.0.0    # Alternativa para extração de texto
+
+# Processamento de texto e regex
+regex>=2023.8.8
+
+# Utilitários
+python-dotenv>=1.0.0
 numpy>=1.24.0
-fitz>=0.0.1
-frontend>=0.0.3
+argparse>=1.4.0
+
+# Interface de usuário (opcional para futuras expansões)
+# gradio>=4.13.0
+# streamlit>=1.29.0
+
+# Avaliação e métricas (opcional)
+# scikit-learn>=1.3.0
+# nltk>=3.8.1
