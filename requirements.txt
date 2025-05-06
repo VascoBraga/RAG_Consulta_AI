@@ -13,7 +13,7 @@ chromadb>=0.4.18
 
 # Processamento de PDF
 pymupdf>=1.23.7  # PyMuPDF para extração de texto de PDFs
-PyPDF2>=3.0.0    # Alternativa para extração de texto
+PyPDF2>=3.0.1    # Alternativa para extração de texto
 
 # Processamento de texto e regex
 regex>=2023.8.8
