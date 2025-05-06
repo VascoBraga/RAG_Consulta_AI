@@ -10,8 +10,8 @@ def load_environment():
     if not os.getenv("OPENAI_API_KEY"):
         raise ValueError("A API key da OpenAI não está configurada. Adicione-a ao arquivo .env")
 
+    #print(f"API KEY carregada: {'*' * 4}{os.getenv('OPENAI_API_KEY')[-4:] if os.getenv('OPENAI_API_KEY') else 'Não Encontrada'}")
     print(f"API KEY carregada: {'*' * 4}{os.getenv('OPENAI_API_KEY')[-4:] if os.getenv('OPENAI_API_KEY') else 'Não Encontrada'}")
-
 
 
 # Configurações globais
@@ -60,21 +60,43 @@ if not os.path.exists(DB_PATH):
 
 
 # Mapeamento de documentos
-DOCUMENTO_PATHS = {
-    "Código do Consumidor (Lei nº 8.078/90)": os.path.join(LEGISLACAO_DIR, "CDC_2024.pdf")
-    #"Lei Complementar n.166/2019": os.path.join(LEGISLACAO_DIR, "lc_166_2019.pdf"),
-    #"Lei n.13.828/2019": os.path.join(LEGISLACAO_DIR, "lei_13828_2019.pdf"),
-    #"Lei n. 9.870/1999":  os.path.join(LEGISLACAO_DIR, "Lei-9870.pdf"),
-    #"Lei n. 10.962/2004": os.path.join(LEGISLACAO_DIR, "Lei-10962.pdf"),
-    #"Lei n. 12.741/2012": os.path.join(LEGISLACAO_DIR, "Lei-12741.pdf"),
-    #"Lei n. 12.291/2010": os.path.join(LEGISLACAO_DIR, "Lei-12291.pdf"),
-    #"Decreto n. 5.903/2006": os.path.join(LEGISLACAO_DIR, "D5903.pdf"),
-    #"Decreto n. 7.962/2013": os.path.join(LEGISLACAO_DIR, "D7962.pdf"),
-    #"Decreto n. 6.523/2008": os.path.join(LEGISLACAO_DIR, "decreto_6523_2008.pdf"),
-    #"Decreto n. 2.181/1997": os.path.join(LEGISLACAO_DIR, "D2182.pdf"),
-    #"Resolução CNSP n. 434": os.path.join(LEGISLACAO_DIR, "CNSP_434.pdf"),
-    #"Resolução CNSP n. 296": os.path.join(LEGISLACAO_DIR, "CNSP_296.pdf")
-}
+def build_document_paths():
+    """Constrói o dicionário de documentos com base nos arquivos disponíveis na pasta de legislação."""
+    documento_paths = {}
+    
+    # Mapeamento de nomes de arquivo para títulos descritivos
+    filename_to_title = {
+        "CDC_2024.pdf": "Código do Consumidor (Lei nº 8.078/90)",
+        "lc_166_2019.pdf": "Lei Complementar n.166/2019",
+        "lei_13828_2019.pdf": "Lei n.13.828/2019",
+        "Lei-9870.pdf": "Lei n. 9.870/1999",
+        "Lei-10962.pdf": "Lei n. 10.962/2004",
+        "Lei-12741.pdf": "Lei n. 12.741/2012",
+        "Lei-12291.pdf": "Lei n. 12.291/2010",
+        "D5903.pdf": "Decreto n. 5.903/2006",
+        "D7962.pdf": "Decreto n. 7.962/2013",
+        "decreto_6523_2008.pdf": "Decreto n. 6.523/2008",
+        "D2181.pdf": "Decreto n. 2.181/1997",
+        "CNSP_434.pdf": "Resolução CNSP n. 434",
+        "CNSP_296.pdf": "Resolução CNSP n. 296"
+    }
+    
+    # Verifica os arquivos disponíveis na pasta
+    for filename in os.listdir(LEGISLACAO_DIR):
+        filepath = os.path.join(LEGISLACAO_DIR, filename)
+        # Verificar se é um arquivo e tem tamanho maior que zero
+        if os.path.isfile(filepath) and os.path.getsize(filepath) > 0:
+            # Se o arquivo está em nosso mapeamento, usamos o título definido
+            if filename in filename_to_title:
+                documento_paths[filename_to_title[filename]] = filepath
+            else:
+                # Para arquivos não mapeados, usamos o nome do arquivo como título
+                documento_paths[filename] = filepath
+    
+    return documento_paths
+
+# Verifica os documentos disponíveis e inclui na base
+DOCUMENTO_PATHS = build_document_paths()
 
 def extract_text_from_pdf(pdf_path):
     """Extrai texto do arquivo PDF."""
