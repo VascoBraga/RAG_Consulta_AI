@@ -22,7 +22,8 @@ def configure_qa_chain(db):
     
     # Template do prompt usando o formato de chat
     template = """
-    Você é um advogado especialista em Direito do Consumidor brasileiro, com profundo conhecimento do CDC.
+    Você é um advogado especialista em Direito do Consumidor brasileiro, com profundo conhecimento do CDC e em 
+    algumas outras legislações existentes as quais estão disponíveis na pasta legislaçao.
 
     Contexto do CDC:
     {context}
@@ -32,7 +33,7 @@ def configure_qa_chain(db):
     Siga estas instruções rigorosamente:
     1. Responda EXATAMENTE à pergunta feita, sem desviar para tópicos relacionados mas não solicitados
     2. Se a pergunta for sobre troca de produtos, foque em prazos e condições para troca, não apenas em defeitos
-    3. Cite os artigos ESPECÍFICOS do CDC que tratam do assunto perguntado
+    3. Cite os artigos ESPECÍFICOS do CDC e das legislacoes da pasta lesgislacao que tratam do assunto perguntado
     4. Estruture sua resposta em tópicos para facilitar a compreensão
     5. Sempre explique os termos técnicos jurídicos em linguagem simples
     6. Quando existirem exceções à regra, mencione-as claramente
@@ -67,7 +68,7 @@ def query_rag(qa_chain, user_question):
         return {"result": f"Erro ao processar a pergunta: {str(e)}"}
 
 def run_bot():
-    """Executa o bot interativo para responder perguntas sobre fluxo de caixa."""
+    """Executa o bot interativo para responder perguntas sobre Direito do Consumidor."""
     # Carrega o ambiente
     load_environment()
     
