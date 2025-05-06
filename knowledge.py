@@ -8,6 +8,20 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores.utils import filter_complex_metadata
 from init import EMBED_MODEL, CHUNK_SIZE, CHUNK_OVERLAP, DB_PATH, DOCUMENTO_PATHS
 
+
+def clear_vector_db():
+    """Limpa completamente o banco de dados vetorial."""
+    import shutil
+    
+    if os.path.exists(DB_PATH):
+        print(f"Removendo banco de dados existente em '{DB_PATH}'...")
+        shutil.rmtree(DB_PATH)
+        os.makedirs(DB_PATH)
+        print("Banco de dados limpo com sucesso.")
+    else:
+        print("Não há banco de dados para limpar.")
+
+
 def extract_text_from_pdf(pdf_path):
     """Extrai texto do arquivo PDF com tratamento de erro robusto."""
     # Verificação do arquivo
@@ -451,31 +465,56 @@ def split_legal_text(text, doc_info):
 
 
 def integrate_consumer_law_documents():
-    """Integra documentos de legislação do consumidor - implementação direta."""
-    # Carrega o banco de dados existente ou cria um novo
+    """Integra documentos de legislação do consumidor com verificação de duplicatas."""
+    # Carrega ou cria o banco de dados
     vector_db = None
     if os.path.exists(DB_PATH) and len(os.listdir(DB_PATH)) > 0:
         print(f"Carregando banco de dados vetorial existente de '{DB_PATH}'...")
         vector_db = load_vector_db()
+        
+        # Verifica quais documentos já estão na base
+        # Usamos o ID ou metadados para identificar documentos já processados
+        try:
+            existing_docs = vector_db.get()
+            existing_sources = set()
+            for metadata in existing_docs.get('metadatas', []):
+                if metadata and 'source' in metadata:
+                    existing_sources.add(metadata['source'])
+            
+            print(f"Documentos já existentes na base: {len(existing_sources)}")
+            for source in existing_sources:
+                print(f"  - {source}")
+                
+            # Filtra apenas os documentos que ainda não foram processados
+            docs_to_process = {}
+            for doc_name, doc_path in DOCUMENTO_PATHS.items():
+                if doc_name not in existing_sources and os.path.exists(doc_path) and os.path.getsize(doc_path) > 0:
+                    docs_to_process[doc_name] = doc_path
+            
+            print(f"Documentos a serem processados: {len(docs_to_process)}")
+            for doc_name in docs_to_process:
+                print(f"  - {doc_name}")
+                
+            # Processa apenas os novos documentos
+            for doc_name, doc_path in docs_to_process.items():
+                print(f"Processando documento: {doc_name} ({doc_path})")
+                vector_db = process_and_add_document(doc_name, doc_path, vector_db=vector_db)
+                
+            return vector_db
+            
+        except Exception as e:
+            print(f"Erro ao verificar documentos existentes: {str(e)}")
+            print("Prosseguindo com processamento completo...")
     
-    # Metadados para o CDC
-    cdc_metadata = {
-        "description": "Lei principal que estabelece normas de proteção e defesa do consumidor",
-        "importance": "alta",
-        "category": "direitos_basicos",
-        "publication_date": "11/09/1990",
-        "scope": "geral",
-        "hierarchy": "lei_principal"
-    }
+    # Se não há banco de dados ou ocorreu erro na verificação,
+    # processa todos os documentos disponíveis
+    print("Processando todos os documentos disponíveis...")
+    for doc_name, doc_path in DOCUMENTO_PATHS.items():
+        if os.path.exists(doc_path) and os.path.getsize(doc_path) > 0:
+            print(f"Processando documento: {doc_name} ({doc_path})")
+            vector_db = process_and_add_document(doc_name, doc_path, vector_db=vector_db)
     
-    # Processa o documento do CDC
-    cdc_path = DOCUMENTO_PATHS["Código do Consumidor (Lei nº 8.078/90)"]
-    vector_db = process_and_add_document(
-        "Código do Consumidor (Lei nº 8.078/90)",
-        cdc_path,
-        vector_db=vector_db, 
-        custom_metadata=cdc_metadata
-    )
+    return vector_db
     
     # Adicione outros documentos conforme necessário
     
